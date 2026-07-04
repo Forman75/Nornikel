@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>R&D-граф знаний · горно-металлургическая отрасль</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1720; --panel:#16212e; --panel2:#1d2b3a; --line:#2a3b4d;
+    --text:#e6edf3; --muted:#8b9cb0; --accent:#3b82f6;
+    --ok:#22c55e; --warn:#ef4444; --gap:#f59e0b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+    background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
+  #root{height:100vh}
+  .app{display:flex;flex-direction:column;height:100vh}
+  header{padding:10px 16px;border-bottom:1px solid var(--line);
+    display:flex;align-items:center;gap:16px;background:var(--panel)}
+  header h1{font-size:15px;margin:0;font-weight:600}
+  header .stats{font-size:12px;color:var(--muted);margin-left:auto}
+  .filters{display:flex;gap:8px;align-items:center;font-size:12px}
+  .filters select,.filters input{background:var(--panel2);color:var(--text);
+    border:1px solid var(--line);border-radius:6px;padding:4px 6px;font-size:12px}
+  .main{display:flex;flex:1;min-height:0}
+  .left{width:420px;border-right:1px solid var(--line);display:flex;
+    flex-direction:column;background:var(--panel)}
+  .tabs{display:flex;border-bottom:1px solid var(--line)}
+  .tabs button{flex:1;background:none;border:none;color:var(--muted);
+    padding:10px;cursor:pointer;font-size:13px;border-bottom:2px solid transparent}
+  .tabs button.active{color:var(--text);border-bottom-color:var(--accent)}
+  .chat{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
+  .msg{padding:10px 12px;border-radius:10px;font-size:13px;line-height:1.5;white-space:pre-wrap}
+  .msg.user{background:var(--accent);align-self:flex-end;max-width:85%}
+  .msg.bot{background:var(--panel2);align-self:flex-start;max-width:95%}
+  .sources{margin-top:8px;border-top:1px solid var(--line);padding-top:8px}
+  .src{font-size:11px;color:var(--muted);margin:4px 0;padding-left:8px;
+    border-left:2px solid var(--accent)}
+  .src b{color:var(--text)}
+  .badge{display:inline-block;font-size:10px;padding:1px 6px;border-radius:8px;
+    background:var(--panel);border:1px solid var(--line);margin-left:6px}
+  .inputbar{display:flex;gap:8px;padding:12px;border-top:1px solid var(--line)}
+  .inputbar textarea{flex:1;background:var(--panel2);color:var(--text);
+    border:1px solid var(--line);border-radius:8px;padding:8px;resize:none;
+    font-family:inherit;font-size:13px;height:56px}
+  .inputbar button{background:var(--accent);color:#fff;border:none;border-radius:8px;
+    padding:0 16px;cursor:pointer;font-size:13px;font-weight:600}
+  .inputbar button:disabled{opacity:.5;cursor:default}
+  #cy{flex:1;background:var(--bg)}
+  .legend{position:absolute;right:16px;bottom:16px;background:var(--panel);
+    border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11px}
+  .legend div{display:flex;align-items:center;gap:6px;margin:3px 0}
+  .dot{width:10px;height:10px;border-radius:50%}
+  .gaprow{font-size:12px;padding:8px;border-bottom:1px solid var(--line)}
+  .gaprow b{color:var(--gap)}
+  .hint{color:var(--muted);font-size:12px;padding:12px;line-height:1.5}
+  .spinner{color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef} = React;
+const API = "";
+const TYPE_COLOR = {
+  Material:"#3b82f6", Process:"#8b5cf6", Equipment:"#06b6d4",
+  Condition:"#f59e0b", Experiment:"#22c55e", Publication:"#64748b",
+  Expert:"#ec4899", Facility:"#14b8a6", Finding:"#eab308", Node:"#64748b"
+};
+
+function useCytoscape(containerRef){
+  const cyRef = useRef(null);
+  useEffect(()=>{
+    if(!containerRef.current || cyRef.current) return;
+    cyRef.current = cytoscape({
+      container: containerRef.current,
+      style:[
+        {selector:"node",style:{
+          "background-color":ele=>TYPE_COLOR[ele.data("label")]||"#64748b",
+          "label":"data(name)","color":"#e6edf3","font-size":"9px",
+          "text-wrap":"wrap","text-max-width":"90px","width":22,"height":22,
+          "border-width":2,"border-color":"#0f1720"}},
+        {selector:"node.hl",style:{"border-color":"#22c55e","border-width":4,"width":30,"height":30}},
+        {selector:"edge",style:{"width":1.5,"line-color":"#2a3b4d",
+          "target-arrow-color":"#2a3b4d","target-arrow-shape":"triangle",
+          "curve-style":"bezier","font-size":"7px","label":"data(type)","color":"#5b6b7d"}},
+        {selector:"edge[type='CONTRADICTS']",style:{"line-color":"#ef4444",
+          "target-arrow-color":"#ef4444","line-style":"dashed","width":2.5}},
+      ],
+      layout:{name:"cose",animate:false,nodeRepulsion:9000,idealEdgeLength:70}
+    });
+  },[containerRef]);
+  return cyRef;
+}
+
+function toElements(nodes,edges){
+  const ids = new Set(nodes.map(n=>n.id));
+  return [
+    ...nodes.map(n=>({data:{id:n.id,name:n.name,label:n.label}})),
+    ...edges.filter(e=>ids.has(e.source)&&ids.has(e.target))
+            .map((e,i)=>({data:{id:"e"+i,source:e.source,target:e.target,type:e.type}}))
+  ];
+}
+
+function App(){
+  const [tab,setTab] = useState("chat");
+  const [messages,setMessages] = useState([]);
+  const [input,setInput] = useState("");
+  const [busy,setBusy] = useState(false);
+  const [stats,setStats] = useState(null);
+  const [gaps,setGaps] = useState([]);
+  const [geo,setGeo] = useState("");
+  const cyDiv = useRef(null);
+  const cy = useCytoscape(cyDiv);
+  useEffect(()=>{
+    fetch(API+"/api/stats").then(r=>r.json()).then(setStats).catch(()=>{});
+    fetch(API+"/api/subgraph?limit=150").then(r=>r.json()).then(d=>{
+      if(cy.current){ cy.current.add(toElements(d.nodes,d.edges));
+        cy.current.layout({name:"cose",animate:false,nodeRepulsion:9000}).run(); }
+    }).catch(()=>{});
+  },[]);
+
+  function highlight(nodes,edges){
+    if(!cy.current) return;
+    cy.current.elements().remove();
+    cy.current.add(toElements(nodes,edges));
+    cy.current.nodes().addClass("hl");
+    cy.current.layout({name:"cose",animate:false,nodeRepulsion:9000,idealEdgeLength:70}).run();
+  }
+
+  async function send(){
+    const q = input.trim(); if(!q||busy) return;
+    setMessages(m=>[...m,{role:"user",text:q}]); setInput(""); setBusy(true);
+    try{
+      const res = await fetch(API+"/api/query",{method:"POST",
+        headers:{"Content-Type":"application/json"},body:JSON.stringify({question:q})});
+      const d = await res.json();
+      setMessages(m=>[...m,{role:"bot",text:d.answer,sources:d.sources,intent:d.intent}]);
+      if(d.nodes && d.nodes.length) highlight(d.nodes,d.edges);
+    }catch(e){
+      setMessages(m=>[...m,{role:"bot",text:"Ошибка запроса: "+e.message}]);
+    }
+    setBusy(false);
+  }
+
+  async function loadGaps(){
+    setTab("gap");
+    const d = await fetch(API+"/api/gap").then(r=>r.json());
+    setGaps(d.gaps||[]);
+  }
+
+  return (
+    <div className="app">
+      <header>
+        <h1>R&D-граф · горно-металлургическая отрасль</h1>
+        <div className="filters">
+          <span>География:</span>
+          <select value={geo} onChange={e=>setGeo(e.target.value)}>
+            <option value="">все</option>
+            <option value="RU">РФ</option>
+            <option value="INTL">зарубеж</option>
+          </select>
+        </div>
+        <div className="stats">
+          {stats ? `узлов: ${Object.values(stats.nodes_by_type).reduce((a,b)=>a+b,0)} · связей: ${stats.relations} · чанков: ${stats.chunks}` : "загрузка…"}
+        </div>
+      </header>
+      <div className="main">
+        <div className="left">
+          <div className="tabs">
+            <button className={tab==="chat"?"active":""} onClick={()=>setTab("chat")}>Вопросы</button>
+            <button className={tab==="gap"?"active":""} onClick={loadGaps}>Пробелы</button>
+          </div>
+          {tab==="chat" ? (
+            <>
+              <div className="chat">
+                {messages.length===0 &&
+                  <div className="hint">Задай технический вопрос, напр.:<br/><br/>
+                  «Какие методы обессоливания воды подходят при сульфатах 200–300 мг/л?»<br/><br/>
+                  «Какая скорость потока католита оптимальна при электроэкстракции никеля?»<br/><br/>
+                  Ответ строится по загруженным документам, справа подсвечивается подграф, ниже — источники.</div>}
+                {messages.map((m,i)=>(
+                  <div key={i} className={"msg "+m.role}>
+                    {m.text}
+                    {m.intent &&
+                      <span className="badge">{m.intent.query_type}</span>}
+                    {m.sources && m.sources.length>0 &&
+                      <div className="sources">
+                        {m.sources.map((s,j)=>(
+                          <div className="src" key={j}>
+                            <b>{s.title}</b>{s.author?", "+s.author:""}{s.year?", "+s.year:""}
+                            <span className="badge">{s.geography||"?"}</span>
+                            <span className="badge">score {s.score.toFixed(2)}</span>
+                          </div>
+                        ))}
+                      </div>}
+                  </div>
+                ))}
+                {busy && <div className="spinner">думаю…</div>}
+              </div>
+              <div className="inputbar">
+                <textarea value={input} onChange={e=>setInput(e.target.value)}
+                  onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}}}
+                  placeholder="Вопрос по графу…"/>
+                <button onClick={send} disabled={busy}>→</button>
+              </div>
+            </>
+          ) : (
+            <div className="chat">
+              <div className="hint">Комбинации материал+процесс, для которых в графе нет эксперимента — потенциально неизученные направления.</div>
+              {gaps.length===0 && <div className="spinner">нет данных (загрузите больше документов)</div>}
+              {gaps.map((g,i)=>(
+                <div className="gaprow" key={i}>
+                  <b>{g.material}</b> × {g.process}
+                  {g.conditions && g.conditions.length>0 &&
+                    <div style={{color:"#8b9cb0",marginTop:4}}>условия: {g.conditions.join(", ")}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div style={{flex:1,position:"relative"}}>
+          <div id="cy" ref={cyDiv}></div>
+          <div className="legend">
+            {Object.entries(TYPE_COLOR).filter(([k])=>k!=="Node").map(([k,c])=>(
+              <div key={k}><span className="dot" style={{background:c}}></span>{k}</div>
+            ))}
+            <div><span className="dot" style={{background:"#ef4444"}}></span>CONTRADICTS (противоречие)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
